@@ -9,7 +9,7 @@ For example:
 	func Runner() func() {
 		r := chi.NewRouter()
 		r.Get("/healthz", healthzHandler)
-		httpServer := &http.Server{Addr: "localhost:8080", Handler: r}
+		httpServer := &http.Server{Addr: ":8080", Handler: r}
 		go runHTTPServer(httpServer)
 
 		return func() {
@@ -30,7 +30,7 @@ For example:
 
 A nice pattern is to create a function that takes in the various depencies required, e.g. configuration, logger, private key, etc., and returns a runner function, e.g.
 	func NewRunner(log *zerolog.Logger) func() func() {
-		return Runner() func() {
+		return func() func() {
 			...all that was in the Runner function above...
 		}
 	}
