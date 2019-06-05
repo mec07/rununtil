@@ -18,6 +18,7 @@ For example:
 			}
 		}
 	}
+
 	func runHTTPServer(srv *http.Server) {
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatal().Stack().Err(err).Msg("ListenAndServe")
@@ -28,10 +29,25 @@ For example:
 		rununtil.KillSignal(Runner)
 	}
 
-A nice pattern is to create a function that takes in the various depencies required, e.g. configuration, logger, private key, etc., and returns a runner function, e.g.
+A nice pattern is to create a function that takes in the various depencies required, for example, a logger (but could be anything, e.g. configs, database, etc.), and returns a runner function:
 	func NewRunner(log *zerolog.Logger) func() func() {
 		return func() func() {
-			...all that was in the Runner function above...
+			r := chi.NewRouter()
+			r.Get("/healthz", healthzHandler)
+			httpServer := &http.Server{Addr: ":8080", Handler: r}
+			go runHTTPServer(httpServer, log)
+
+			return func() {
+				if err := httpServer.Shutdown(context.Background()); err != nil {
+					log.Error().Err(err).Msg("error occurred while shutting down http server")
+				}
+			}
+		}
+	}
+
+	func runHTTPServer(srv *http.Server, log *zerolog.Logger) {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatal().Stack().Err(err).Msg("ListenAndServe")
 		}
 	}
 
@@ -52,7 +68,7 @@ import (
 )
 
 // KillSignal runs the provided runner function until it receives a kill signal,
-// at which point it executes the graceful shutdown function.
+// SIGINT or SIGTERM, at which point it executes the graceful shutdown function.
 func KillSignal(runner func() func()) {
 	Signals(runner, syscall.SIGINT, syscall.SIGTERM)
 }
