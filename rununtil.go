@@ -63,9 +63,9 @@ It is of course possible to specify which signals you would like to use to kill 
 	rununtil.Signals(NewRunner(logger), syscall.SIGKILL, syscall.SIGHUP, syscall.SIGINT)
 
 For testing purposes you may want to run your main function, which is using `rununtil.KillSignal`, and send it a kill signal when you're done with your tests. To aid with this you can use:
-	cancel := rununtil.Killed(main)
+	kill := rununtil.Killed(main)
 
-where `cancel` is a function that sends a kill signal to the main function (its type is context.CancelFunc).
+where `kill` is a function that sends a kill signal to the main function when executed (its type is context.CancelFunc).
 */
 package rununtil
 
