@@ -151,3 +151,12 @@ func TestRununtilSimulateKillSignal_Threadsafe(t *testing.T) {
 		rununtil.SimulateKillSignal()
 	}
 }
+
+// Annoyingly this test has to be run by itself to actually fail...
+//	go test -v -run TestKilled_FailsForNonblockingMain
+// Fixed test by not actually sending a kill signal anymore --
+// it now calls rununtil.SimulateKillSignal().
+func TestKilled_FailsForNonblockingMain(t *testing.T) {
+	cancel := rununtil.Killed(func() {})
+	cancel()
+}

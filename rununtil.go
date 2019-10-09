@@ -217,7 +217,5 @@ func runMain(ctx context.Context, main func()) {
 func killMainWhenDone(ctx context.Context, p *os.Process) {
 	<-ctx.Done()
 
-	if err := p.Signal(syscall.SIGINT); err != nil {
-		fmt.Printf("ERROR: %+v\n", errors.Wrap(err, "trying to kill main"))
-	}
+	SimulateKillSignal()
 }
