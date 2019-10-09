@@ -71,7 +71,7 @@ For testing purposes you may want to run your main function, which is using `run
 The `SimulateKillSignal` function kills all of the `RunnerFuncs` that you may have started in your main function.
 
 The old functions `KillSignal`, `Signals` and `Killed` are still here (for backwards compatibility), but they have been deprecated.
-Please use `AwaitKillSignal` instead of `KillSignal`, `AwaitKillSignals` instead of `Signals` and `SimulateKillSignal` instead of `Killed` followed by executing the `context.CancelFunc` that it returns.
+Please use `AwaitKillSignal` instead of `KillSignal`, `AwaitKillSignals` instead of `Signals`, and `SimulateKillSignal` instead of `Killed` (now you can just rain main and then issue the simulated kill signal).
 */
 package rununtil
 
