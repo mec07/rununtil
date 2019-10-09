@@ -27,11 +27,11 @@ func helperMakeFakeRunner(hasBeenShutdown *bool) rununtil.RunnerFunc {
 
 func helperMakeMain(hasBeenKilled *bool) func() {
 	return func() {
-		rununtil.KillSignal(helperMakeFakeRunner(hasBeenKilled))
+		rununtil.AwaitKillSignal(helperMakeFakeRunner(hasBeenKilled))
 	}
 }
 
-func TestRunUntilKillSignal(t *testing.T) {
+func TestRununtilAwaitKillSignal(t *testing.T) {
 	table := []struct {
 		name   string
 		signal os.Signal
@@ -55,7 +55,7 @@ func TestRunUntilKillSignal(t *testing.T) {
 			}
 
 			go helperSendSignal(t, p, &sentSignal, test.signal, 1*time.Millisecond)
-			rununtil.KillSignal(helperMakeFakeRunner(&hasBeenShutdown))
+			rununtil.AwaitKillSignal(helperMakeFakeRunner(&hasBeenShutdown))
 			if !sentSignal {
 				t.Fatal("expected signal to have been sent")
 			}
@@ -66,14 +66,66 @@ func TestRunUntilKillSignal(t *testing.T) {
 	}
 }
 
-func TestRunUntilKilled(t *testing.T) {
+func TestRununtilAwaitKillSignal_MultipleRunnerFuncs(t *testing.T) {
+	var hasBeenShutdown1, hasBeenShutdown2, hasBeenShutdown3 bool
+	var sentSignal bool
+
+	p, err := os.FindProcess(os.Getpid())
+	if err != nil {
+		t.Fatalf("Unexpected error when finding process: %v", err)
+	}
+
+	go helperSendSignal(t, p, &sentSignal, syscall.SIGINT, time.Millisecond)
+
+	rununtil.AwaitKillSignal(
+		helperMakeFakeRunner(&hasBeenShutdown1),
+		helperMakeFakeRunner(&hasBeenShutdown2),
+		helperMakeFakeRunner(&hasBeenShutdown3),
+	)
+
+	if !sentSignal {
+		t.Fatal("expected signal to have been sent")
+	}
+	if !hasBeenShutdown1 {
+		t.Fatal("expected the shutdown function 1 to have been called")
+	}
+	if !hasBeenShutdown2 {
+		t.Fatal("expected the shutdown function 2 to have been called")
+	}
+	if !hasBeenShutdown3 {
+		t.Fatal("expected the shutdown function 3 to have been called")
+	}
+}
+
+func TestRununtilRunMain(t *testing.T) {
 	var hasBeenKilled bool
-	kill := rununtil.Killed(helperMakeMain(&hasBeenKilled))
-	kill()
+	cancel := rununtil.RunMain(helperMakeMain(&hasBeenKilled))
+	cancel()
 
 	// yield control back to scheduler so that killing can actually happen
 	time.Sleep(time.Millisecond)
 	if !hasBeenKilled {
 		t.Fatal("expected main to have been killed")
 	}
+}
+
+// If we send a kill signal to a function that doesn't actually block then we
+// end up with a failed test.
+// Need to run just this test to see the effect:
+// go test -v -run TestRunUntilKilled_NonblockingMain
+// This test was made to pass by adding the globalCanceller.signal
+func TestRununtilRunMain_NonblockingMain(t *testing.T) {
+	kill := rununtil.RunMain(func() {})
+	kill()
+}
+
+func TestRununtilRunMain_NonblockingMainMultipleTimes(t *testing.T) {
+	kill := rununtil.RunMain(func() {})
+	kill()
+
+	kill = rununtil.RunMain(func() {})
+	kill()
+
+	kill = rununtil.RunMain(func() {})
+	kill()
 }
