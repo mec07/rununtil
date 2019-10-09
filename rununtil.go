@@ -171,21 +171,14 @@ func SimulateKillSignal() {
 // SIGINT or SIGTERM, at which point it executes the graceful shutdown function.
 // Deprecated. Please use AwaitKillSignal.
 func KillSignal(runner RunnerFunc) {
-	Signals(runner, syscall.SIGINT, syscall.SIGTERM)
+	AwaitKillSignal(runner)
 }
 
 // Signals runs the provided runner function until the specified signals have
 // been recieved.
 // Deprecated. Please use AwaitKillSignals.
 func Signals(runner RunnerFunc, signals ...os.Signal) {
-	c := make(chan os.Signal, 1)
-	signal.Notify(c, signals...)
-
-	shutdown := runner()
-	defer shutdown()
-
-	// Wait for a kill signal
-	<-c
+	AwaitKillSignals(signals, runner)
 }
 
 // Killed is used for testing a function that is using rununtil.KillSignal.
