@@ -97,9 +97,9 @@ func TestRununtilAwaitKillSignal_MultipleRunnerFuncs(t *testing.T) {
 	}
 }
 
-func TestRununtilRunMain(t *testing.T) {
+func TestRununtilKilled(t *testing.T) {
 	var hasBeenKilled bool
-	cancel := rununtil.RunMain(helperMakeMain(&hasBeenKilled))
+	cancel := rununtil.Killed(helperMakeMain(&hasBeenKilled))
 	cancel()
 
 	// yield control back to scheduler so that killing can actually happen
@@ -109,23 +109,45 @@ func TestRununtilRunMain(t *testing.T) {
 	}
 }
 
-// If we send a kill signal to a function that doesn't actually block then we
-// end up with a failed test.
-// Need to run just this test to see the effect:
-// go test -v -run TestRunUntilKilled_NonblockingMain
-// This test was made to pass by adding the globalCanceller.signal
-func TestRununtilRunMain_NonblockingMain(t *testing.T) {
-	kill := rununtil.RunMain(func() {})
-	kill()
+func TestRununtilSimulateKillSignal(t *testing.T) {
+	var hasBeenKilled bool
+	rununtil.Killed(helperMakeMain(&hasBeenKilled))
+
+	// yield control back to scheduler so that the go routines can actually
+	// start
+	time.Sleep(time.Millisecond)
+
+	rununtil.SimulateKillSignal()
+
+	// yield control back to scheduler so that killing can actually happen
+	time.Sleep(time.Millisecond)
+	if !hasBeenKilled {
+		t.Fatal("expected main to have been killed")
+	}
 }
 
-func TestRununtilRunMain_NonblockingMainMultipleTimes(t *testing.T) {
-	kill := rununtil.RunMain(func() {})
-	kill()
+func TestRununtilSimulateKillSignal_MultipleTimes(t *testing.T) {
+	var hasBeenKilled bool
+	for idx := 0; idx < 100; idx++ {
+		hasBeenKilled = false
+		rununtil.Killed(helperMakeMain(&hasBeenKilled))
 
-	kill = rununtil.RunMain(func() {})
-	kill()
+		// yield control back to scheduler so that the go routines can actually
+		// start
+		time.Sleep(time.Millisecond)
 
-	kill = rununtil.RunMain(func() {})
-	kill()
+		rununtil.SimulateKillSignal()
+
+		// yield control back to scheduler so that killing can actually happen
+		time.Sleep(time.Millisecond)
+		if !hasBeenKilled {
+			t.Fatal("expected main to have been killed")
+		}
+	}
+}
+
+func TestRununtilSimulateKillSignal_Threadsafe(t *testing.T) {
+	for idx := 0; idx < 100; idx++ {
+		rununtil.SimulateKillSignal()
+	}
 }
