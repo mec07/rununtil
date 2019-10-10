@@ -2,9 +2,10 @@
 
 Usage
 
-The main usage of rununtil is to run a webserver or other function until a SIGINT or SIGTERM signal has been received.
-The runner function can do some setup but it should not run indefinitely, instead it should start go routines which can run in the background.
-The runner function should return a graceful shutdown function that will be called once the signal has been received.
+The main usage of rununtil is to run your main app indefinitely until a SIGINT or SIGTERM signal has been received.
+The `AwaitKillSignal` is a blocking function which waits until a kill signal has been received.
+It takes in `RunnerFunc`s which are nonblocking functions which set off go routines (e.g. to run an HTTP server or a gRPC server) and return a `ShutdownFunc`.
+The `ShutdownFunc`s are executed when a kill signal has been received to allow for graceful shutdown of the go routines set off by the `RunnerFunc`s.
 For example:
 	func Runner() rununtil.ShutdownFunc {
 		r := chi.NewRouter()
@@ -26,11 +27,12 @@ For example:
 	}
 
 	func main() {
-		rununtil.KillSignal(Runner)
+		rununtil.AwaitKillSignal(Runner)
 	}
 
+The `AwaitKillSignal` function blocks until either a kill signal has been received or `CancelAll` has been triggered.
 A nice pattern is to create a function that takes in the various depencies required, for example, a logger (but could be anything, e.g. configs, database, etc.), and returns a runner function:
-	func NewRunner(log *zerolog.Logger) rununtil.RunnerFunc {
+	func NewRunner(log zerolog.Logger) rununtil.RunnerFunc {
 		return rununtil.RunnerFunc(func() rununtil.ShutdownFunc {
 			r := chi.NewRouter()
 			r.Get("/healthz", healthzHandler)
@@ -45,7 +47,7 @@ A nice pattern is to create a function that takes in the various depencies requi
 		})
 	}
 
-	func runHTTPServer(srv *http.Server, log *zerolog.Logger) {
+	func runHTTPServer(srv *http.Server, log zerolog.Logger) {
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatal().Stack().Err(err).Msg("ListenAndServe")
 		}
@@ -56,16 +58,21 @@ A nice pattern is to create a function that takes in the various depencies requi
 		if err != nil {
 			return
 		}
-		rununtil.KillSignal(NewRunner(logger))
+		rununtil.AwaitKillSignal(NewRunner(logger))
 	}
 
-It is of course possible to specify which signals you would like to use to kill your application using the `Signals` function, for example:
-	rununtil.Signals(NewRunner(logger), syscall.SIGKILL, syscall.SIGHUP, syscall.SIGINT)
+It is of course possible to specify which signals you would like to use to kill your application using the `AwaitKillSignals` function, for example:
+	rununtil.AwaitKillSignals([]os.Signal{syscall.SIGKILL, syscall.SIGHUP, syscall.SIGINT}, NewRunner(logger))
 
-For testing purposes you may want to run your main function, which is using `rununtil.KillSignal`, and send it a kill signal when you're done with your tests. To aid with this you can use:
-	kill := rununtil.Killed(main)
+For testing purposes you may want to run your main function, which is using `rununtil.AwaitKillSignal`, and then kill it by simulating sending a kill signal when you're done with your tests. To aid with this you can:
+	go main()
+	... do your tests ...
+	rununtil.CancelAll()
 
-where `kill` is a function that sends a kill signal to the main function when executed (its type is context.CancelFunc).
+The `CancelAll` function results in the same behaviour as sending a real kill signal to your program would, i.e.~graceful shutdown is initiated.
+
+The old functions `KillSignal`, `Signals` and `Killed` are still here (for backwards compatibility), but they have been deprecated.
+Please use `AwaitKillSignal` instead of `KillSignal`, `AwaitKillSignals` instead of `Signals`, and `CancelAll` instead of `Killed` (now you can just run in a go routine main and then execute `CancelAll` to finish the `AwaitKillSignal`).
 */
 package rununtil
 
@@ -74,36 +81,108 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 
+	"github.com/google/uuid"
 	"github.com/pkg/errors"
 )
+
+type canceller struct {
+	signals map[string]chan struct{}
+	mux     sync.Mutex
+}
+
+func (canc *canceller) addChannel(key string, c chan struct{}) {
+	canc.mux.Lock()
+	canc.signals[key] = c
+	canc.mux.Unlock()
+}
+
+func (canc *canceller) removeChannel(key string) {
+	canc.mux.Lock()
+	delete(canc.signals, key)
+	canc.mux.Unlock()
+}
+
+func (canc *canceller) cancelAll() {
+	canc.mux.Lock()
+	for key := range canc.signals {
+		close(canc.signals[key])
+	}
+	canc.mux.Unlock()
+}
+
+var globalCanceller canceller
+
+func init() {
+	globalCanceller.mux.Lock()
+	globalCanceller.signals = make(map[string]chan struct{})
+	globalCanceller.mux.Unlock()
+}
 
 // ShutdownFunc is a function that should be returned by a RunnerFunc which
 // gracefully shuts down whatever is being run.
 type ShutdownFunc func()
 
-// RunnerFunc is a function that sets off the worker go routines and returns
-// a function which can shutdown those worker go routines.
+// RunnerFunc is a nonblocking function that sets off the worker go routines and
+// returns a function which can shutdown those worker go routines.
 type RunnerFunc func() ShutdownFunc
+
+// AwaitKillSignal runs the provided RunnerFuncs until it receives a kill
+// signal, SIGINT or SIGTERM, at which point it executes the graceful shutdown
+// functions.
+func AwaitKillSignal(runnerFuncs ...RunnerFunc) {
+	AwaitKillSignals([]os.Signal{syscall.SIGINT, syscall.SIGTERM}, runnerFuncs...)
+}
+
+// AwaitKillSignals runs the provided RunnerFuncs until the specified
+// signals have been recieved, at which point it executes the graceful shutdown
+// functions.
+func AwaitKillSignals(signals []os.Signal, runnerFuncs ...RunnerFunc) {
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, signals...)
+
+	finish := make(chan struct{})
+	uuid := uuid.New()
+	globalCanceller.addChannel(uuid.String(), finish)
+	defer globalCanceller.removeChannel(uuid.String())
+
+	for _, runner := range runnerFuncs {
+		shutdown := runner()
+		defer shutdown()
+	}
+
+	// Wait for a kill signal
+	select {
+	case <-c:
+		break
+	case <-finish:
+		break
+	}
+}
+
+// CancelAll will stop all the awaits in the same way that a kill
+// signal would stop them. To use:
+//	go main()
+//	... do your tests ...
+//	rununtil.CancelAll()
+func CancelAll() {
+	globalCanceller.cancelAll()
+}
 
 // KillSignal runs the provided runner function until it receives a kill signal,
 // SIGINT or SIGTERM, at which point it executes the graceful shutdown function.
+// Deprecated. Please use AwaitKillSignal.
 func KillSignal(runner RunnerFunc) {
-	Signals(runner, syscall.SIGINT, syscall.SIGTERM)
+	AwaitKillSignal(runner)
 }
 
 // Signals runs the provided runner function until the specified signals have
 // been recieved.
+// Deprecated. Please use AwaitKillSignals.
 func Signals(runner RunnerFunc, signals ...os.Signal) {
-	c := make(chan os.Signal, 1)
-	signal.Notify(c, signals...)
-
-	shutdown := runner()
-	defer shutdown()
-
-	// Wait for a kill signal
-	<-c
+	AwaitKillSignals(signals, runner)
 }
 
 // Killed is used for testing a function that is using rununtil.KillSignal.
@@ -114,6 +193,8 @@ func Signals(runner RunnerFunc, signals ...os.Signal) {
 //	kill()
 //
 // where main is a function that is using rununtil.KillSignal.
+// Deprecated. Please just run your main function and use
+// rununtil.CancelAll.
 func Killed(main func()) context.CancelFunc {
 	ctx, cancel := context.WithCancel(context.Background())
 	go runMain(ctx, main)
@@ -133,7 +214,5 @@ func runMain(ctx context.Context, main func()) {
 func killMainWhenDone(ctx context.Context, p *os.Process) {
 	<-ctx.Done()
 
-	if err := p.Signal(syscall.SIGINT); err != nil {
-		fmt.Printf("ERROR: %+v\n", errors.Wrap(err, "trying to kill main"))
-	}
+	CancelAll()
 }
