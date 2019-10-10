@@ -3,8 +3,9 @@
 Usage
 
 The main usage of rununtil is to run your main app indefinitely until a SIGINT or SIGTERM signal has been received.
-The runner function can do some setup but it should not run indefinitely, instead it should start go routines which can run in the background.
-The runner function should return a graceful shutdown function that will be called once the signal has been received.
+The `AwaitKillSignal` is a blocking function which waits until a kill signal has been received.
+It takes in `RunnerFunc`s which are nonblocking functions which set off go routines (e.g. to run an HTTP server or a gRPC server) and return a `ShutdownFunc`.
+The `ShutdownFunc`s are executed when a kill signal has been received to allow for graceful shutdown of the go routines set off by the `RunnerFunc`s.
 For example:
 	func Runner() rununtil.ShutdownFunc {
 		r := chi.NewRouter()
@@ -31,7 +32,7 @@ For example:
 
 The `AwaitKillSignal` function blocks until either a kill signal has been received or `SimulateKillSignal` has been triggered.
 A nice pattern is to create a function that takes in the various depencies required, for example, a logger (but could be anything, e.g. configs, database, etc.), and returns a runner function:
-	func NewRunner(log *zerolog.Logger) rununtil.RunnerFunc {
+	func NewRunner(log zerolog.Logger) rununtil.RunnerFunc {
 		return rununtil.RunnerFunc(func() rununtil.ShutdownFunc {
 			r := chi.NewRouter()
 			r.Get("/healthz", healthzHandler)
@@ -46,7 +47,7 @@ A nice pattern is to create a function that takes in the various depencies requi
 		})
 	}
 
-	func runHTTPServer(srv *http.Server, log *zerolog.Logger) {
+	func runHTTPServer(srv *http.Server, log zerolog.Logger) {
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatal().Stack().Err(err).Msg("ListenAndServe")
 		}
@@ -68,7 +69,7 @@ For testing purposes you may want to run your main function, which is using `run
 	... do your tests ...
 	rununtil.SimulateKillSignal()
 
-The `SimulateKillSignal` function kills all of the `RunnerFuncs` that you may have started in your main function.
+The `SimulateKillSignal` function results in the same behaviour as sending a real kill signal to your program would, i.e.~graceful shutdown is initiated.
 
 The old functions `KillSignal`, `Signals` and `Killed` are still here (for backwards compatibility), but they have been deprecated.
 Please use `AwaitKillSignal` instead of `KillSignal`, `AwaitKillSignals` instead of `Signals`, and `SimulateKillSignal` instead of `Killed` (now you can just rain main and then issue the simulated kill signal).
@@ -124,18 +125,18 @@ func init() {
 // gracefully shuts down whatever is being run.
 type ShutdownFunc func()
 
-// RunnerFunc is a function that sets off the worker go routines and returns
-// a function which can shutdown those worker go routines.
+// RunnerFunc is a nonblocking function that sets off the worker go routines and
+// returns a function which can shutdown those worker go routines.
 type RunnerFunc func() ShutdownFunc
 
-// AwaitKillSignal runs the provided runner functions until it receives a kill
+// AwaitKillSignal runs the provided RunnerFuncs until it receives a kill
 // signal, SIGINT or SIGTERM, at which point it executes the graceful shutdown
 // functions.
 func AwaitKillSignal(runnerFuncs ...RunnerFunc) {
 	AwaitKillSignals([]os.Signal{syscall.SIGINT, syscall.SIGTERM}, runnerFuncs...)
 }
 
-// AwaitKillSignals runs the provided runner function until the specified
+// AwaitKillSignals runs the provided RunnerFuncs until the specified
 // signals have been recieved, at which point it executes the graceful shutdown
 // functions.
 func AwaitKillSignals(signals []os.Signal, runnerFuncs ...RunnerFunc) {
@@ -145,6 +146,7 @@ func AwaitKillSignals(signals []os.Signal, runnerFuncs ...RunnerFunc) {
 	finish := make(chan struct{})
 	uuid := uuid.New()
 	globalCanceller.addChannel(uuid.String(), finish)
+	defer globalCanceller.removeChannel(uuid.String())
 
 	for _, runner := range runnerFuncs {
 		shutdown := runner()
@@ -158,11 +160,13 @@ func AwaitKillSignals(signals []os.Signal, runnerFuncs ...RunnerFunc) {
 	case <-finish:
 		break
 	}
-	globalCanceller.removeChannel(uuid.String())
 }
 
 // SimulateKillSignal will stop all the awaits in the same way that a kill
-// signal would stop them.
+// signal would stop them. To use:
+//	go main()
+//	... do your tests ...
+//	rununtil.SimulateKillSignal()
 func SimulateKillSignal() {
 	globalCanceller.cancelAll()
 }
