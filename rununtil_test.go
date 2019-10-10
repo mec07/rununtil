@@ -109,7 +109,7 @@ func TestRununtilKilled(t *testing.T) {
 	}
 }
 
-func TestRununtilSimulateKillSignal(t *testing.T) {
+func TestRununtilCancelAll(t *testing.T) {
 	var hasBeenKilled bool
 	rununtil.Killed(helperMakeMain(&hasBeenKilled))
 
@@ -117,7 +117,7 @@ func TestRununtilSimulateKillSignal(t *testing.T) {
 	// start
 	time.Sleep(time.Millisecond)
 
-	rununtil.SimulateKillSignal()
+	rununtil.CancelAll()
 
 	// yield control back to scheduler so that killing can actually happen
 	time.Sleep(time.Millisecond)
@@ -126,7 +126,7 @@ func TestRununtilSimulateKillSignal(t *testing.T) {
 	}
 }
 
-func TestRununtilSimulateKillSignal_MultipleTimes(t *testing.T) {
+func TestRununtilCancelAll_MultipleTimes(t *testing.T) {
 	var hasBeenKilled bool
 	for idx := 0; idx < 100; idx++ {
 		hasBeenKilled = false
@@ -136,7 +136,7 @@ func TestRununtilSimulateKillSignal_MultipleTimes(t *testing.T) {
 		// start
 		time.Sleep(time.Millisecond)
 
-		rununtil.SimulateKillSignal()
+		rununtil.CancelAll()
 
 		// yield control back to scheduler so that killing can actually happen
 		time.Sleep(time.Millisecond)
@@ -146,16 +146,16 @@ func TestRununtilSimulateKillSignal_MultipleTimes(t *testing.T) {
 	}
 }
 
-func TestRununtilSimulateKillSignal_Threadsafe(t *testing.T) {
+func TestRununtilCancelAll_Threadsafe(t *testing.T) {
 	for idx := 0; idx < 100; idx++ {
-		rununtil.SimulateKillSignal()
+		rununtil.CancelAll()
 	}
 }
 
 // Annoyingly this test has to be run by itself to actually fail...
 //	go test -v -run TestKilled_FailsForNonblockingMain
 // Fixed test by not actually sending a kill signal anymore --
-// it now calls rununtil.SimulateKillSignal().
+// it now calls rununtil.CancelAll().
 func TestKilled_FailsForNonblockingMain(t *testing.T) {
 	cancel := rununtil.Killed(func() {})
 	cancel()

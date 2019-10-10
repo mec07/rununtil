@@ -30,7 +30,7 @@ For example:
 		rununtil.AwaitKillSignal(Runner)
 	}
 
-The `AwaitKillSignal` function blocks until either a kill signal has been received or `SimulateKillSignal` has been triggered.
+The `AwaitKillSignal` function blocks until either a kill signal has been received or `CancelAll` has been triggered.
 A nice pattern is to create a function that takes in the various depencies required, for example, a logger (but could be anything, e.g. configs, database, etc.), and returns a runner function:
 	func NewRunner(log zerolog.Logger) rununtil.RunnerFunc {
 		return rununtil.RunnerFunc(func() rununtil.ShutdownFunc {
@@ -67,12 +67,12 @@ It is of course possible to specify which signals you would like to use to kill 
 For testing purposes you may want to run your main function, which is using `rununtil.AwaitKillSignal`, and then kill it by simulating sending a kill signal when you're done with your tests. To aid with this you can:
 	go main()
 	... do your tests ...
-	rununtil.SimulateKillSignal()
+	rununtil.CancelAll()
 
-The `SimulateKillSignal` function results in the same behaviour as sending a real kill signal to your program would, i.e.~graceful shutdown is initiated.
+The `CancelAll` function results in the same behaviour as sending a real kill signal to your program would, i.e.~graceful shutdown is initiated.
 
 The old functions `KillSignal`, `Signals` and `Killed` are still here (for backwards compatibility), but they have been deprecated.
-Please use `AwaitKillSignal` instead of `KillSignal`, `AwaitKillSignals` instead of `Signals`, and `SimulateKillSignal` instead of `Killed` (now you can just rain main and then issue the simulated kill signal).
+Please use `AwaitKillSignal` instead of `KillSignal`, `AwaitKillSignals` instead of `Signals`, and `CancelAll` instead of `Killed` (now you can just run in a go routine main and then execute `CancelAll` to finish the `AwaitKillSignal`).
 */
 package rununtil
 
@@ -162,12 +162,12 @@ func AwaitKillSignals(signals []os.Signal, runnerFuncs ...RunnerFunc) {
 	}
 }
 
-// SimulateKillSignal will stop all the awaits in the same way that a kill
+// CancelAll will stop all the awaits in the same way that a kill
 // signal would stop them. To use:
 //	go main()
 //	... do your tests ...
-//	rununtil.SimulateKillSignal()
-func SimulateKillSignal() {
+//	rununtil.CancelAll()
+func CancelAll() {
 	globalCanceller.cancelAll()
 }
 
@@ -194,7 +194,7 @@ func Signals(runner RunnerFunc, signals ...os.Signal) {
 //
 // where main is a function that is using rununtil.KillSignal.
 // Deprecated. Please just run your main function and use
-// rununtil.SimulateKillSignal.
+// rununtil.CancelAll.
 func Killed(main func()) context.CancelFunc {
 	ctx, cancel := context.WithCancel(context.Background())
 	go runMain(ctx, main)
@@ -214,5 +214,5 @@ func runMain(ctx context.Context, main func()) {
 func killMainWhenDone(ctx context.Context, p *os.Process) {
 	<-ctx.Done()
 
-	SimulateKillSignal()
+	CancelAll()
 }
