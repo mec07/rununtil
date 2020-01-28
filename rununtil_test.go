@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mec07/rununtil"
+	"github.com/kaluza-tech/rununtil"
 )
 
 func helperSendSignal(t *testing.T, p *os.Process, sent *bool, signal os.Signal, delay time.Duration) {

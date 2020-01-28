@@ -1,4 +1,4 @@
-module github.com/mec07/rununtil
+module github.com/kaluza-tech/rununtil
 
 go 1.12
 
