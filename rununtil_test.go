@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mec07/rununtil"
+	"github.com/kaluza-tech/rununtil"
 )
 
 func helperSendSignal(t *testing.T, p *os.Process, sent *bool, signal os.Signal, delay time.Duration) {
@@ -147,8 +147,18 @@ func TestRununtilCancelAll_MultipleTimes(t *testing.T) {
 }
 
 func TestRununtilCancelAll_Threadsafe(t *testing.T) {
+	var hasBeenKilledVec [100]bool
 	for idx := 0; idx < 100; idx++ {
+		cancel := rununtil.Killed(helperMakeMain(&hasBeenKilledVec[idx]))
+		cancel()
 		rununtil.CancelAll()
+	}
+	// yield control back to scheduler so that killing can actually happen
+	time.Sleep(time.Millisecond)
+	for idx, hasBeenKilled := range hasBeenKilledVec {
+		if !hasBeenKilled {
+			t.Fatalf("expected main to have been killed: %d", idx)
+		}
 	}
 }
 
